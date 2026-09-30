@@ -1,57 +1,22 @@
-- name: Check and repair ETH 5m data
+- name: Diagnose ETH data
   run: |
     python - <<'PY'
     import pandas as pd
-    import os
 
     f = "user_data/data/binance/ETH_USDT-5m.feather"
-
-    print("FILE:", f)
-    print("SIZE:", os.path.getsize(f))
-
     df = pd.read_feather(f)
 
-    print("CANDLES BEFORE:", len(df))
-    print("COLUMNS:", df.columns.tolist())
+    print("CANDLES:", len(df))
+    print("DATE TYPE:", df["date"].dtype)
 
-    # Chuẩn hóa date
-    df["date"] = pd.to_datetime(df["date"], errors="coerce", utc=True)
+    d = pd.to_datetime(df["date"], errors="coerce", utc=True)
 
-    # Loại timestamp lỗi / thiếu
-    bad = df["date"].isna()
+    print("NaT:", d.isna().sum())
 
-    print("BAD DATE ROWS:", int(bad.sum()))
+    # In 10 timestamp đầu/cuối dưới dạng raw
+    print("\nRAW LAST 10:")
+    print(df["date"].tail(10).to_string(index=False))
 
-    df = df.loc[~bad].copy()
-
-    # Chỉ giữ timestamp hợp lý
-    min_date = pd.Timestamp("2020-01-01", tz="UTC")
-    max_date = pd.Timestamp("2035-01-01", tz="UTC")
-
-    bad_range = (df["date"] < min_date) | (df["date"] >= max_date)
-
-    print("OUT OF RANGE ROWS:", int(bad_range.sum()))
-
-    df = df.loc[~bad_range].copy()
-
-    # Sắp xếp thời gian
-    df = df.sort_values("date")
-
-    # Loại timestamp trùng
-    before = len(df)
-    df = df.drop_duplicates(subset=["date"], keep="first")
-
-    print("DUPLICATE ROWS REMOVED:", before - len(df))
-
-    # Kiểm tra khoảng thời gian
-    print("CANDLES AFTER:", len(df))
-    print("FROM:", df["date"].min().isoformat())
-    print("TO:", df["date"].max().isoformat())
-
-    # Lưu lại
-    df.reset_index(drop=True).to_feather(f)
-
-    print("REPAIRED FILE SAVED:", f)
+    print("\nRAW FIRST 10:")
+    print(df["date"].head(10).to_string(index=False))
     PY
-
-    ls -lh user_data/data/binance/ETH_USDT-5m.feather
