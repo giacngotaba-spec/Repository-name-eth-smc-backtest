@@ -1,22 +1,39 @@
-- name: Diagnose ETH data
+- name: FIX ETH 5m timestamp
   run: |
     python - <<'PY'
     import pandas as pd
 
     f = "user_data/data/binance/ETH_USDT-5m.feather"
+
     df = pd.read_feather(f)
 
-    print("CANDLES:", len(df))
-    print("DATE TYPE:", df["date"].dtype)
+    print("BEFORE:", len(df))
+    print("COLUMNS:", df.columns.tolist())
 
-    d = pd.to_datetime(df["date"], errors="coerce", utc=True)
+    # Chuyển date về datetime an toàn
+    df["date"] = pd.to_datetime(
+        df["date"],
+        errors="coerce",
+        utc=True
+    )
 
-    print("NaT:", d.isna().sum())
+    # Xóa timestamp lỗi
+    df = df.dropna(subset=["date"])
 
-    # In 10 timestamp đầu/cuối dưới dạng raw
-    print("\nRAW LAST 10:")
-    print(df["date"].tail(10).to_string(index=False))
+    # Chỉ giữ dữ liệu hợp lệ
+    df = df[
+        (df["date"] >= pd.Timestamp("2024-01-01", tz="UTC")) &
+        (df["date"] <= pd.Timestamp("2030-01-01", tz="UTC"))
+    ]
 
-    print("\nRAW FIRST 10:")
-    print(df["date"].head(10).to_string(index=False))
+    # Sắp xếp và bỏ trùng
+    df = df.sort_values("date")
+    df = df.drop_duplicates("date")
+
+    df.reset_index(drop=True).to_feather(f)
+
+    print("AFTER:", len(df))
+    print("FROM:", df["date"].iloc[0])
+    print("TO:", df["date"].iloc[-1])
+    print("FIX OK")
     PY
