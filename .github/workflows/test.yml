@@ -1,233 +1,57 @@
-name: ETH SMC ICT Backtest
+- name: Check and repair ETH 5m data
+  run: |
+    python - <<'PY'
+    import pandas as pd
+    import os
 
-on:
-  workflow_dispatch:
+    f = "user_data/data/binance/ETH_USDT-5m.feather"
 
-jobs:
-  backtest:
-    runs-on: ubuntu-latest
+    print("FILE:", f)
+    print("SIZE:", os.path.getsize(f))
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+    df = pd.read_feather(f)
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+    print("CANDLES BEFORE:", len(df))
+    print("COLUMNS:", df.columns.tolist())
 
-      - name: Install packages
-        run: |
-          python -m pip install --upgrade pip
-          pip install freqtrade pandas pyarrow requests
+    # Chuẩn hóa date
+    df["date"] = pd.to_datetime(df["date"], errors="coerce", utc=True)
 
-      - name: Check strategy
-        run: |
-          test -f user_data/strategies/ETH_SMC_ICT.py
-          python -m py_compile user_data/strategies/ETH_SMC_ICT.py
-          echo "STRATEGY OK"
+    # Loại timestamp lỗi / thiếu
+    bad = df["date"].isna()
 
-      - name: Prepare data folders
-        run: |
-          mkdir -p user_data/data/binance
+    print("BAD DATE ROWS:", int(bad.sum()))
 
-      - name: Download ETHUSDT 5m historical data
-        run: |
-          cd /tmp
+    df = df.loc[~bad].copy()
 
-          for year in 2024 2025 2026; do
-            for month in 01 02 03 04 05 06 07 08 09 10 11 12; do
+    # Chỉ giữ timestamp hợp lý
+    min_date = pd.Timestamp("2020-01-01", tz="UTC")
+    max_date = pd.Timestamp("2035-01-01", tz="UTC")
 
-              if [ "$year" = "2024" ] && [ "$month" -lt "09" ]; then
-                continue
-              fi
+    bad_range = (df["date"] < min_date) | (df["date"] >= max_date)
 
-              if [ "$year" = "2026" ] && [ "$month" -gt "09" ]; then
-                continue
-              fi
+    print("OUT OF RANGE ROWS:", int(bad_range.sum()))
 
-              FILE="ETHUSDT-5m-${year}-${month}.zip"
-              URL="https://data.binance.vision/data/spot/monthly/klines/ETHUSDT/5m/${FILE}"
+    df = df.loc[~bad_range].copy()
 
-              echo "Downloading ${FILE}"
+    # Sắp xếp thời gian
+    df = df.sort_values("date")
 
-              curl -fL --retry 3 \
-                "$URL" \
-                -o "$FILE" || true
+    # Loại timestamp trùng
+    before = len(df)
+    df = df.drop_duplicates(subset=["date"], keep="first")
 
-              if [ -f "$FILE" ]; then
-                unzip -o "$FILE" -d /tmp/ethdata/ || true
-              fi
+    print("DUPLICATE ROWS REMOVED:", before - len(df))
 
-            done
-          done
+    # Kiểm tra khoảng thời gian
+    print("CANDLES AFTER:", len(df))
+    print("FROM:", df["date"].min().isoformat())
+    print("TO:", df["date"].max().isoformat())
 
-      - name: Convert Binance CSV to Freqtrade Feather
-        run: |
-          python <<'PY'
-          import glob
-          import os
-          import pandas as pd
+    # Lưu lại
+    df.reset_index(drop=True).to_feather(f)
 
-          files = sorted(
-              glob.glob("/tmp/ethdata/*.csv")
-          )
+    print("REPAIRED FILE SAVED:", f)
+    PY
 
-          print("CSV files:", len(files))
-
-          if not files:
-              raise SystemExit("KHONG CO DU LIEU ETHUSDT")
-
-          columns = [
-              "date",
-              "open",
-              "high",
-              "low",
-              "close",
-              "volume",
-              "close_time",
-              "quote_volume",
-              "trades",
-              "taker_buy_base",
-              "taker_buy_quote",
-              "ignore"
-          ]
-
-          frames = []
-
-          for f in files:
-              try:
-                  df = pd.read_csv(
-                      f,
-                      header=None,
-                      names=columns
-                  )
-
-                  df = df[
-                      [
-                          "date",
-                          "open",
-                          "high",
-                          "low",
-                          "close",
-                          "volume"
-                      ]
-                  ]
-
-                  frames.append(df)
-
-                  print(
-                      "Loaded:",
-                      os.path.basename(f),
-                      len(df)
-                  )
-
-              except Exception as e:
-                  print(
-                      "Skip:",
-                      f,
-                      e
-                  )
-
-          data = pd.concat(
-              frames,
-              ignore_index=True
-          )
-
-          data["date"] = pd.to_datetime(
-              data["date"],
-              unit="ms",
-              utc=True
-          )
-
-          for col in [
-              "open",
-              "high",
-              "low",
-              "close",
-              "volume"
-          ]:
-              data[col] = pd.to_numeric(
-                  data[col],
-                  errors="coerce"
-              )
-
-          data = data.dropna()
-
-          data = data.drop_duplicates(
-              subset=["date"]
-          )
-
-          data = data.sort_values("date")
-
-          data.to_feather(
-              "user_data/data/binance/ETH_USDT-5m.feather"
-          )
-
-          print(
-              "FINAL CANDLES:",
-              len(data)
-          )
-
-          print(
-              "FROM:",
-              data["date"].iloc[0]
-          )
-
-          print(
-              "TO:",
-              data["date"].iloc[-1]
-          )
-          PY
-
-      - name: Check historical data
-        run: |
-          ls -lh user_data/data/binance/
-          python - <<'PY'
-          import pandas as pd
-
-          f = "user_data/data/binance/ETH_USDT-5m.feather"
-
-          df = pd.read_feather(f)
-
-          print("CANDLES:", len(df))
-          print("FROM:", df["date"].min())
-          print("TO:", df["date"].max())
-          PY
-
-      - name: Create config
-        run: |
-          cat > user_data/config.json <<'EOF'
-          {
-            "$schema": "https://schema.freqtrade.io/schema.json",
-            "dry_run": true,
-            "stake_currency": "USDT",
-            "stake_amount": 100,
-            "dry_run_wallet": 1000,
-            "max_open_trades": 1,
-            "timeframe": "5m",
-            "dataformat_ohlcv": "feather",
-            "exchange": {
-              "name": "binance",
-              "key": "",
-              "secret": "",
-              "pair_whitelist": [
-                "ETH/USDT"
-              ]
-            },
-            "pairlists": [
-              {
-                "method": "StaticPairList"
-              }
-            ]
-          }
-          EOF
-
-      - name: Run backtest
-        run: |
-          freqtrade backtesting \
-            --config user_data/config.json \
-            --strategy ETH_SMC_ICT \
-            --timerange 20240930-20260930 \
-            --export trades \
-            --export-filename user_data/backtest-result.json
+    ls -lh user_data/data/binance/ETH_USDT-5m.feather
