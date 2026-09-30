@@ -1,10 +1,10 @@
-name: Test Freqtrade
+name: ETH SMC ICT Backtest
 
 on:
   workflow_dispatch:
 
 jobs:
-  test:
+  backtest:
     runs-on: ubuntu-latest
 
     steps:
@@ -30,3 +30,55 @@ jobs:
           test -f user_data/strategies/ETH_SMC_ICT.py
           python -m py_compile user_data/strategies/ETH_SMC_ICT.py
           echo "STRATEGY OK"
+
+      - name: Download ETHUSDT 5m
+        run: |
+          mkdir -p user_data/data
+
+          freqtrade download-data \
+            --exchange bybit \
+            --pairs ETH/USDT \
+            --timeframes 5m \
+            --timerange 20240930-20260930 \
+            --datadir user_data/data \
+            --userdir user_data
+
+      - name: Check downloaded data
+        run: |
+          echo "===== DATA ====="
+          find user_data/data -type f -maxdepth 3 -print
+          echo "===== SIZE ====="
+          du -sh user_data/data
+
+      - name: Create config
+        run: |
+          cat > user_data/config.json <<'EOF'
+          {
+            "$schema": "https://schema.freqtrade.io/schema.json",
+            "dry_run": true,
+            "stake_currency": "USDT",
+            "stake_amount": 100,
+            "timeframe": "5m",
+            "max_open_trades": 1,
+            "exchange": {
+              "name": "bybit",
+              "key": "",
+              "secret": "",
+              "pair_whitelist": [
+                "ETH/USDT"
+              ]
+            },
+            "pairlists": [
+              {
+                "method": "StaticPairList"
+              }
+            ]
+          }
+          EOF
+
+      - name: Run backtest
+        run: |
+          freqtrade backtesting \
+            --config user_data/config.json \
+            --strategy ETH_SMC_ICT \
+            --timerange 20240930-20260930
