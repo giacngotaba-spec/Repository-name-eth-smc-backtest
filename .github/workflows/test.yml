@@ -1,4 +1,4 @@
-name: Test GitHub Actions
+name: Test Freqtrade
 
 on:
   workflow_dispatch:
@@ -8,7 +8,25 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Test
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Freqtrade
         run: |
-          echo "GITHUB ACTIONS OK"
-          echo "ETH SMC BACKTEST"
+          python -m pip install --upgrade pip
+          pip install freqtrade
+
+      - name: Check Freqtrade
+        run: |
+          freqtrade --version
+
+      - name: Check Strategy
+        run: |
+          test -f user_data/strategies/ETH_SMC_ICT.py
+          python -m py_compile user_data/strategies/ETH_SMC_ICT.py
+          echo "STRATEGY OK"
