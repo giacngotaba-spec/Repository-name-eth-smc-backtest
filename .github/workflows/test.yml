@@ -1,108 +1,13 @@
-name: ETH SMC ICT Backtest
+from backtest import run_backtest, load_data
+from trading_bot import run_paper_trade
 
-on:
-  push:
-    branches: [main]
-  workflow_dispatch:
-  schedule:
-    - cron: "0 * * * *"  # Chạy mỗi giờ
 
-jobs:
-  backtest:
-    runs-on: ubuntu-latest
-    
-    steps:
-      - uses: actions/checkout@v3
-      
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-      
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pandas pyarrow requests python-telegram-bot
-      
-      - name: Create data directory structure
-        run: |
-          mkdir -p user_data/data/binance
-          echo "Data directory created"
-      
-      - name: FIX ETH 5m timestamp (if file exists)
-        run: |
-          python - <<'PY'
-          import os
-          import pandas as pd
-          
-          f = "user_data/data/binance/ETH_USDT-5m.feather"
-          
-          if not os.path.exists(f):
-              print(f"⚠️ File not found: {f}")
-              print("Creating empty placeholder...")
-              # Tạo DataFrame trống thay vì fail
-              df = pd.DataFrame({
-                  'date': pd.date_range('2024-01-01', periods=0, tz='UTC'),
-                  'open': [],
-                  'high': [],
-                  'low': [],
-                  'close': [],
-                  'volume': []
-              })
-              df.to_feather(f)
-              print(f"✅ Created placeholder: {f}")
-          else:
-              print(f"✅ File found: {f}")
-              df = pd.read_feather(f)
-              
-              print("BEFORE:", len(df))
-              print("COLUMNS:", df.columns.tolist())
-              
-              # Chuyển date về datetime an toàn
-              df["date"] = pd.to_datetime(
-                  df["date"],
-                  errors="coerce",
-                  utc=True
-              )
-              
-              # Xóa timestamp lỗi
-              df = df.dropna(subset=["date"])
-              
-              # Chỉ giữ dữ liệu hợp lệ
-              df = df[
-                  (df["date"] >= pd.Timestamp("2024-01-01", tz="UTC")) &
-                  (df["date"] <= pd.Timestamp("2030-01-01", tz="UTC"))
-              ]
-              
-              # Sắp xếp và bỏ trùng
-              df = df.sort_values("date")
-              df = df.drop_duplicates("date")
-              
-              df.reset_index(drop=True).to_feather(f)
-              
-              print("AFTER:", len(df))
-              if len(df) > 0:
-                  print("FROM:", df["date"].iloc[0])
-                  print("TO:", df["date"].iloc[-1])
-              print("✅ FIX OK")
-          PY
-      
-      - name: Run trading bot
-        continue-on-error: true
-        env:
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          if [ -f "bot.py" ]; then
-            python bot.py
-          else
-            echo "⚠️ bot.py not found, skipping bot execution"
-          fi
-      
-      - name: Upload results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: backtest-results
-          path: user_data/
-          retention-days: 7
+def main():
+    df = load_data()
+    run_backtest(df)
+    run_paper_trade()
+    print("✅ Pipeline complete")
+
+
+if __name__ == "__main__":
+    main()
