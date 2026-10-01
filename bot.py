@@ -7,55 +7,51 @@ import requests
 
 DATA_DIR = Path("user_data/data/binance")
 DATA_FILE = DATA_DIR / "ETH_USDT-5m.feather"
-BINANCE_URL = "https://api.binance.com/api/v3/klines"
+KUCOIN_URL = "https://api.kucoin.com/api/v1/market/candles"
 
 
 def fetch_eth_5m_data(limit: int = 1000):
-    """Fetch recent ETH/USDT 5m candles from Binance."""
+    """Fetch recent ETH/USDT 5m candles from KuCoin."""
     params = {
-        "symbol": "ETHUSDT",
-        "interval": "5m",
+        "type": "5min",
+        "symbol": "ETH-USDT",
         "limit": limit,
     }
     headers = {"User-Agent": "Mozilla/5.0"}
 
     for attempt in range(3):
         try:
-            response = requests.get(BINANCE_URL, params=params, headers=headers, timeout=20)
-            print(f"Binance status: {response.status_code}")
-
-            if response.status_code == 451:
-                print("❌ Binance blocked this IP/region (HTTP 451).")
-                return None
-
+            response = requests.get(KUCOIN_URL, params=params, headers=headers, timeout=20)
+            print(f"KuCoin status: {response.status_code}")
             response.raise_for_status()
-            raw = response.json()
-            if not raw:
-                print("⚠️ Empty Binance response.")
+            payload = response.json()
+
+            if payload.get("code") != "200000":
+                print(f"⚠️ KuCoin error payload: {payload}")
                 return None
 
-            cols = [
-                "open_time",
-                "open",
-                "high",
-                "low",
-                "close",
-                "volume",
-                "close_time",
-                "quote_asset_volume",
-                "number_of_trades",
-                "taker_buy_base_asset_volume",
-                "taker_buy_quote_asset_volume",
-                "ignore",
-            ]
-            df = pd.DataFrame(raw, columns=cols)
-            df["date"] = pd.to_datetime(df["open_time"], unit="ms", utc=True)
+            raw = payload.get("data", [])
+            if not raw:
+                print("⚠️ Empty KuCoin response.")
+                return None
 
-            for col in ["open", "high", "low", "close", "volume"]:
-                df[col] = pd.to_numeric(df[col], errors="coerce")
+            rows = []
+            for item in raw:
+                # KuCoin candles format: [time, open, close, high, low, volume, turnover]
+                candle_time = pd.to_datetime(item[0], unit="ms", utc=True)
+                rows.append({
+                    "date": candle_time,
+                    "open": float(item[1]),
+                    "high": float(item[3]),
+                    "low": float(item[4]),
+                    "close": float(item[2]),
+                    "volume": float(item[5]),
+                })
 
-            df = df[["date", "open", "high", "low", "close", "volume"]].dropna().reset_index(drop=True)
-            return df
+            df = pd.DataFrame(rows)
+            if df.empty:
+                return None
+            return df[["date", "open", "high", "low", "close", "volume"]].dropna().reset_index(drop=True)
 
         except Exception as exc:
             print(f"⚠️ Attempt {attempt + 1} failed: {exc}")
@@ -100,18 +96,18 @@ def send_telegram_message(message: str):
 
 
 def main():
-    print("🤖 Starting ETH bot...")
+    print("🤖 Starting ETH bot with KuCoin...")
 
     df = fetch_eth_5m_data(limit=1000)
     if df is not None:
         save_data(df)
-        send_telegram_message(f"<b>ETH/USDT</b> dataset refreshed successfully. Rows: {len(df)}")
+        send_telegram_message(f"<b>ETH/USDT</b> dataset refreshed successfully from KuCoin. Rows: {len(df)}")
     else:
         if DATA_FILE.exists():
             print(f"⚠️ Using existing file: {DATA_FILE}")
         else:
             save_data(None)
-            send_telegram_message("<b>ETH/USDT</b> bot started but no market data was available from Binance.")
+            send_telegram_message("<b>ETH/USDT</b> bot started but no market data was available from KuCoin.")
 
     print("✅ Bot run complete")
 
